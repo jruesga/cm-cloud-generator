@@ -146,7 +146,7 @@ public class WordCloud {
         System.out.println("\r\nProcessing words. DONE");
     }
 
-    public boolean fill(List<WordFrequency> wordFrequencies, String[] extraWords, int pass) {
+    public boolean fill(List<WordFrequency> wordFrequencies, int pass) {
         this.padder = new WordPixelPadder();
         this.collisionChecker = new RectanglePixelCollisionChecker();
         List<Word> skipped = new ArrayList<>(this.skipped);
@@ -171,44 +171,45 @@ public class WordCloud {
                     createProgress((j * 100)/total) + " " + j + " / " + total + " (" + (j * 100)/total + "%)" + skip);
         }
         System.out.println("\r\nProcessing skipped (pass " + (pass) + "). DONE");
+        boolean ret = this.skipped.size() == 0;
+        return ret;
+    }
 
-        if (this.skipped.size() == 0) {
-            System.out.println("Filling...");
-            int count = extraWords.length;
-            this.fontScalar.reduceBy(2);
-            for (int i = 0; i < count * 10; i++) {
-                Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
-                int startX = (width / 2) + (width / 4);
-                int startY = (height / 2) + (height / 4);
-                place(word, startX, startY);
-            }
-            for (int i = 0; i < count * 10; i++) {
-                Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
-                int startX = width;
-                int startY = height;
-                place(word, startX, startY);
-            }
-            for (int i = 0; i < count * 10; i++) {
-                Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
-                int startX = width / 2;
-                int startY = height;
-                place(word, startX, startY);
-            }
-            for (int i = 0; i < count * 10; i++) {
-                Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
-                int startX = width;
-                int startY = height / 2;
-                place(word, startX, startY);
-            }
-            for (int i = 0; i < count * 10; i++) {
-                Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
-                int startX = 0;
-                int startY = height;
-                place(word, startX, startY);
-            }
-            this.skipped.clear();
+    public void fillWithOtherWords(List<WordFrequency> wordFrequencies, String[] extraWords) {
+        System.out.println("Filling...");
+        int count = extraWords.length;
+        this.fontScalar.reduceBy(2);
+        for (int i = 0; i < count * 5; i++) {
+            Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
+            int startX = (width / 2) + (width / 4);
+            int startY = (height / 2) + (height / 4);
+            place(word, startX, startY);
         }
-        return this.skipped.size() == 0;
+        for (int i = 0; i < count * 5; i++) {
+            Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
+            int startX = width;
+            int startY = height;
+            place(word, startX, startY);
+        }
+        for (int i = 0; i < count * 5; i++) {
+            Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
+            int startX = width / 2;
+            int startY = height;
+            place(word, startX, startY);
+        }
+        for (int i = 0; i < count * 5; i++) {
+            Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
+            int startX = width;
+            int startY = height / 2;
+            place(word, startX, startY);
+        }
+        for (int i = 0; i < count * 5; i++) {
+            Word word = buildWord(new WordFrequency(-1, extraWords[i % 5], extraWords[i % 5], 0), maxFrequency(wordFrequencies), colorPalette);
+            int startX = 0;
+            int startY = height;
+            place(word, startX, startY);
+        }
+        this.skipped.clear();
     }
     
     public void printSkippedWords() {

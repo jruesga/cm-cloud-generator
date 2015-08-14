@@ -847,9 +847,10 @@ public class CloudGenerator {
             wordCloud.build(wordFrequencies);
 
             boolean done = false;
-            for (int i = 0; i <=3; i++) {
+            int i;
+            for (i = 0; i <=4; i++) {
                 scalar.reduceBy(1);
-                if (wordCloud.fill(wordFrequencies, EXTRA_WORDS, i+1)) {
+                if (wordCloud.fill(wordFrequencies, i+1)) {
                     done = true;
                     break;
                 }
@@ -858,10 +859,13 @@ public class CloudGenerator {
                 int newsize = size + DEFAULT_CLOUD_INCREMENT;
                 LOGGER.info("Word cloud doesn't fit in " + size + "x" + size +
                         ". Retrying at " + newsize + "x" + newsize +" ...");
+                wordCloud.writeToImage(CLOUD_IMAGE + "." + size + "x" + size + ".png");
                 size += increment;
                 continue;
             }
+            scalar.reduceBy(4-i);
             wordCloud.printSkippedWords();
+            wordCloud.fillWithOtherWords(wordFrequencies, EXTRA_WORDS);
 
             LOGGER.info("Saving wordcloud. Image size " + size + "x" + size);
             wordCloud.drawForgroundToBackground();

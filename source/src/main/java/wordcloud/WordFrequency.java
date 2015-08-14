@@ -35,7 +35,9 @@ public class WordFrequency implements Comparable<WordFrequency> {
 
     @Override
     public int compareTo(WordFrequency wordFrequency) {
-        return wordFrequency.frequency - frequency;
+        int ret = wordFrequency.frequency - frequency;
+        if (ret == 0) ret = wordFrequency.word.length() - word.length();
+        return ret;
     }
 
 }
