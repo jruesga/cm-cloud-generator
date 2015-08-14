@@ -5,6 +5,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.filefilter.IOFileFilter;
 import org.apache.commons.io.filefilter.TrueFileFilter;
 import org.apache.log4j.Logger;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import wordcloud.CollisionMode;
@@ -29,6 +30,7 @@ import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -39,8 +41,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.sql.Types;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collection;
+import java.util.Date;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -53,26 +58,27 @@ public class CloudGenerator {
     private static final String ROOT_DIR = "./";
     private static final String DB_NAME = ROOT_DIR + "db/cloud.db";
     private static final String ACCOUNTS_DIR = ROOT_DIR + "db/accounts";
+    private static final String CHANGES_DIR = ROOT_DIR + "db/changes";
     private static final String STATS_DIR = ROOT_DIR + "db/stats/";
     private static final String WELL_KNOWN_ACCOUNTS = ROOT_DIR + "resources/well-known-accounts.txt";
-    
+
     private static final String ALL_STATS_FILENAME = "all_stats.dat";
     private static final String TRANSLATIONS_STATS_FILENAME = "translations_stats.dat";
-    
+
     private static final String CLOUD_DATA = ROOT_DIR + "db/cloud.data";
     private static final String CLOUD_IMAGE = ROOT_DIR + "out/cloud.png";
     private static final String CLOUD_SVG = ROOT_DIR + "out/cloud.svg";
     private static final String CLOUD_DB_FILE = ROOT_DIR + "out/cloud.db";
     private static final String CLOUD_DATA_OUTPUT = ROOT_DIR + "out/cloud.data";
     private static final String CLOUD_DIST_FILE = ROOT_DIR + "out/cloud.zip";
-    
+
     private static final String CLOUD_BG_SVG = ROOT_DIR + "resources/cid_head.svg";
     private static final String CLOUD_BG_PNG = ROOT_DIR + "resources/cid_head.png";
     private static final String CLOUD_FONT = ROOT_DIR + "resources/Roboto-Bold.ttf";
     private static final String LAST_CLOUD_SIZE = ROOT_DIR + "db/last_cloud_size.txt";
-    private static final int DEFAULT_CLOUD_SIZE = 1800;
+    private static final int DEFAULT_CLOUD_SIZE = 1920;
     private static final int DEFAULT_CLOUD_INCREMENT = 4;
-    
+
     private static int wellKnownAccounts;
 
     private static class Account {
@@ -84,6 +90,8 @@ public class CloudGenerator {
     }
 
     public static void main(String[] args) throws Exception {
+        boolean FROM_GERRIT = true;
+
         new File(DB_NAME).delete();
         new File(CLOUD_DB_FILE).delete();
         Connection conn = createDb();
@@ -93,12 +101,22 @@ public class CloudGenerator {
         try {
             LOGGER.info("Collecting data");
             processAccounts(conn);
-            processStats(conn);
+            processStats(conn); // Still use the github data to map emails
+            if (FROM_GERRIT) {
+                fetchAllGerritCommits();
+                processAllGerritCommits(conn);
+            }
             create_indexes(conn);
             extractEmailsFromCommitNames(conn);
-            computeCommitsPerProject(conn);
-            generateCloudData(conn);
-            filterDataByUserWithCommits(conn);
+
+            if (FROM_GERRIT) {
+                generateCloudDataFromGerrit(conn);
+                writeGerritCloudData(conn);
+            } else {
+                computeCommitsPerProject(conn);
+                generateCloudDataFromGithub(conn);
+                filterDataByUserWithCommits(conn);
+            }
 
             LOGGER.info("Generating cloud");
             generateCloud(connMetadata);
@@ -132,6 +150,7 @@ public class CloudGenerator {
         st.execute("drop table if exists raw_cloud_data;");
         st.execute("drop table if exists all_accounts_with_commits;");
         st.execute("drop table if exists cloud_data;");
+        st.execute("drop table if exists gerrit_commits;");
         st.execute("create table accounts (id NUMBER, accountId NUMBER, username TEXT, name TEXT, email TEXT);");
         st.execute("create table gerrit_accounts (accountId NUMBER, username TEXT, name TEXT, email TEXT);");
         st.execute("create table usernames (id NUMBER, username TEXT);");
@@ -143,10 +162,11 @@ public class CloudGenerator {
         st.execute("create table raw_cloud_data (commits NUMBER, id NUMBER, name TEXT, username TEXT, filter TEXT);");
         st.execute("create table all_accounts_with_commits (accountId NUMBER);");
         st.execute("create table cloud_data (commits NUMBER, id NUMBER, name TEXT, username TEXT, filter TEXT);");
+        st.execute("create table gerrit_commits (id NUMBER, changeId TEXT, project TEXT, branch TEXT, subject TEXT, author_name TEXT, author_email TEXT, owner_name, owner_email);");
         st.close();
         return conn;
     }
-    
+
     private static Connection createMetadataDb() throws Exception {
         Connection conn = DriverManager.getConnection("jdbc:sqlite:" + CLOUD_DB_FILE);
         Statement st = conn.createStatement();
@@ -177,6 +197,9 @@ public class CloudGenerator {
         st.execute("create index all_commits_idx_2 on all_commits (email);");
         st.execute("create index translations_commits_idx_1 on translations_commits (name);");
         st.execute("create index translations_commits_idx_2 on translations_commits (email);");
+        st.execute("create index gerrit_commits_idx_1 on gerrit_commits (author_email);");
+        st.execute("create index gerrit_commits_idx_2 on gerrit_commits (owner_email);");
+        st.execute("create index gerrit_commits_idx_3 on gerrit_commits (changeId);");
         st.close();
     }
 
@@ -198,7 +221,7 @@ public class CloudGenerator {
         st.execute("drop table if exists temp_emails;");
         st.close();
     }
-    
+
     private static void computeCommitsPerProject(Connection conn) throws Exception {
         Statement st = conn.createStatement();
         st.execute("insert into stats (project, id, commits) " +
@@ -221,7 +244,7 @@ public class CloudGenerator {
         st.close();
     }
 
-    private static void generateCloudData(Connection conn) throws Exception {
+    private static void generateCloudDataFromGithub(Connection conn) throws Exception {
         Statement st = conn.createStatement();
         st.execute("insert into raw_cloud_data (commits, id, name, username, filter) " +
                 "select sum(stats.commits) commits, accounts.id, accounts.name, accounts.username, a.filter " +
@@ -243,7 +266,32 @@ public class CloudGenerator {
                 "order by 1 desc;");
         st.close();
     }
-    
+
+    private static void generateCloudDataFromGerrit(Connection conn) throws Exception {
+        Statement st = conn.createStatement();
+        st.execute("insert into cloud_data (commits, id, name, username, filter) " +
+                "select count(*) commits, a.id, a.name, a.username, f.filter from ( " +
+                "select (select e.id from emails e where e.email = c.author_email) id, changeId from gerrit_commits c " +
+                "where c.subject <> 'Automatic translation import' " +
+                ") c, accounts a, " +
+                "( " +
+                "select id, group_concat(filter,'|') filter from " +
+                "( " +
+                "select id, group_concat(username,'|') filter from usernames " +
+                "group by id " +
+                "union " +
+                "select id, group_concat(name,'|') filter from names " +
+                "group by id " +
+                ") " +
+                "group by id " +
+                ") f " +
+                "where c.id = a.id " +
+                "and a.id = f.id " +
+                "group by a.id " +
+                "order by commits desc");
+        st.close();
+    }
+
     @SuppressWarnings("unchecked")
     private static void filterDataByUserWithCommits(Connection conn) throws Exception {
         Statement st = conn.createStatement();
@@ -261,11 +309,14 @@ public class CloudGenerator {
             for (String email : emails) {
                 if (userHasCommits(id, accountId, name, email)) {
                     new File(ACCOUNTS_DIR, accountId + ".hasCommits").createNewFile();
+                    if (new File(ACCOUNTS_DIR, accountId + ".noHasCommits").exists()) {
+                        new File(ACCOUNTS_DIR, accountId + ".noHasCommits").delete();
+                    }
                     hasCommits = true;
                     break;
                 }
             }
-            
+
             File noHasCommits = new File(ACCOUNTS_DIR, accountId + ".noHasCommits");
             if (!hasCommits && (!noHasCommits.exists() || (System.currentTimeMillis() - noHasCommits.lastModified()) > 2592000000L)) { // 30 days
                 noHasCommits.createNewFile();
@@ -284,7 +335,7 @@ public class CloudGenerator {
             public boolean accept(File file) {
                 return file.isFile() && file.getName().endsWith(".hasCommits");
             }
-            
+
         }, TrueFileFilter.INSTANCE);
 
         PreparedStatement ps1 = conn.prepareStatement("insert into all_accounts_with_commits (accountId) values (?);");
@@ -302,6 +353,226 @@ public class CloudGenerator {
 
         FileWriter fw = new FileWriter(CLOUD_DATA);
         rs = st.executeQuery("select id, commits, name, filter from cloud_data order by 1;");
+        while (rs.next()) {
+            String id = rs.getString(1);
+            String commits = rs.getString(2);
+            String name = cleanup(rs.getString(3));
+            String filter = cleanup(rs.getString(4));
+            fw.write(String.format("%s,%s,%s|%s", id, commits, name, filter) + "\r\n");
+        }
+        fw.close();
+        rs.close();
+        st.close();
+    }
+
+    private static void fetchAllGerritCommits() throws Exception {
+        final StringBuffer start = new StringBuffer("2010-10-28");
+        File statsDir = new File(CHANGES_DIR);
+        FileUtils.listFiles(statsDir, new IOFileFilter() {
+            @Override
+            public boolean accept(File dir, String name) {
+                if (name.compareTo(start.toString()) > 0) {
+                    start.setLength(0);
+                    start.append(name);
+                }
+                return true;
+            }
+
+            @Override
+            public boolean accept(File file) {
+                String name = file.getName();
+                if (name.compareTo(start.toString()) > 0) {
+                    start.setLength(0);
+                    start.append(name);
+                }
+                return true;
+            }
+
+        }, TrueFileFilter.INSTANCE);
+
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        Calendar c = Calendar.getInstance();
+        c.setTime(sdf.parse(start.toString()));
+        c.set(Calendar.HOUR, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        c.add(Calendar.DAY_OF_YEAR, -30);
+        Calendar now = Calendar.getInstance();
+        now.set(Calendar.HOUR, 0);
+        now.set(Calendar.MINUTE, 0);
+        now.set(Calendar.SECOND, 0);
+        now.set(Calendar.MILLISECOND, 0);
+        while (c.compareTo(now) <= 0) {
+            fetchGerritCommits(c.getTime());
+            c.add(Calendar.DAY_OF_YEAR, 1);
+        }
+    }
+
+    private static void fetchGerritCommits(Date date) {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+        Calendar c = Calendar.getInstance();
+        c.setTime(date);
+        c.set(Calendar.HOUR, 0);
+        c.set(Calendar.MINUTE, 0);
+        c.set(Calendar.SECOND, 0);
+        c.set(Calendar.MILLISECOND, 0);
+        String end = sdf.format(c.getTime());
+        c.add(Calendar.DAY_OF_YEAR, 1);
+        String start = sdf.format(c.getTime());
+
+        LOGGER.info("Fetching gerrit changes: " + end);
+        File dir = new File(CHANGES_DIR, end);
+        dir.mkdirs();
+        int i = 1;
+        int s = 0;
+        final int count = 250;
+        while (true) {
+            try {
+                String url = "http://review.cyanogenmod.org/changes/?q=status:merged+before:\"" + start + "\"+after:\"" + end + "\"&n=" + count + "&O=a&o=DETAILED_ACCOUNTS";
+                if (s > 0) {
+                    url += "&S="+s;
+                }
+
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(
+                                new URL(url).openStream(), "UTF-8"));
+                FileWriter fw = new FileWriter(new File(dir, String.valueOf(i)));
+                reader.readLine();
+                int read = -1;
+                char[] data = new char[10240];
+                StringBuffer sb = new StringBuffer();
+                while ((read = reader.read(data, 0, 10240)) != -1) {
+                    sb.append(data, 0, read);
+                    fw.write(data, 0, read);
+                }
+                reader.close();
+                fw.close();
+
+                if (sb.indexOf("\"_more_changes\": true") == -1) {
+                    break;
+                }
+
+                i++;
+                s+=count;
+
+            } catch (Exception ex) {
+                LOGGER.error("Error downloading gerrit changes " + end + "-" + start, ex);
+                break;
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void processAllGerritCommits(Connection conn) throws Exception {
+        File changesDir = new File(CHANGES_DIR);
+        Collection<File> changes = FileUtils.listFiles(changesDir, new IOFileFilter() {
+            @Override
+            public boolean accept(File dir, String name) {
+                return true;
+            }
+
+            @Override
+            public boolean accept(File file) {
+                return true;
+            }
+
+        }, TrueFileFilter.INSTANCE);
+
+        PreparedStatement ps1 = conn.prepareStatement("insert into gerrit_commits (id, changeId, project, branch, subject, author_name, author_email, owner_name, owner_email) values (?,?,?,?,?,?,?,?,?);");
+
+        for (File change : changes) {
+            if (!change.isFile()) continue;
+            String json = readJson(change, false);
+            if (json.trim().length() == 0) continue;
+            try {
+                JSONArray a = new JSONArray(json);
+                int count = a.length();
+                for (int i = 0; i < count; i++) {
+                    JSONObject o = a.getJSONObject(i);
+                    int id = o.optInt("_number", i);
+                    String changeId = o.optString("change_id");
+                    String project = o.optString("project");
+                    String branch = o.optString("branch");
+                    String subject = o.optString("subject");
+                    String curRev = o.optString("current_revision");
+                    String author_name = null;
+                    String author_email = null;
+                    try {
+                        JSONObject author =  o.optJSONObject("revisions").getJSONObject(curRev).getJSONObject("commit").getJSONObject("author");
+                        author_name = cleanup(author.optString("name"));
+                        author_email = cleanup(author.optString("email"));
+                    } catch (Exception ex) {
+                        try {
+                            JSONObject owner =  o.optJSONObject("owner");
+                            author_name = cleanup(owner.optString("name"));
+                            author_email = cleanup(owner.optString("email"));
+                        } catch (Exception ex2) {
+                            System.out.println("Fail to read current revision data. change: " + change + "; changeId: " + changeId);
+                        }
+                    }
+                    JSONObject owner =  o.optJSONObject("owner");
+                    String owner_name = cleanup(owner.optString("name"));
+                    String owner_email = cleanup(owner.optString("email"));
+
+                    ps1.setInt(1, id);
+                    if (!isEmpty(changeId)) {
+                        ps1.setString(2, changeId);
+                    } else {
+                        ps1.setNull(2, Types.VARCHAR);
+                    }
+                    if (!isEmpty(project)) {
+                        ps1.setString(3, project);
+                    } else {
+                        ps1.setNull(3, Types.VARCHAR);
+                    }
+                    if (!isEmpty(branch)) {
+                        ps1.setString(4, branch);
+                    } else {
+                        ps1.setNull(4, Types.VARCHAR);
+                    }
+                    if (!isEmpty(subject)) {
+                        ps1.setString(5, subject);
+                    } else {
+                        ps1.setNull(5, Types.VARCHAR);
+                    }
+                    if (!isEmpty(author_name)) {
+                        ps1.setString(6, author_name);
+                    } else {
+                        ps1.setNull(6, Types.VARCHAR);
+                    }
+                    if (!isEmpty(author_email)) {
+                        ps1.setString(7, author_email);
+                    } else {
+                        ps1.setNull(7, Types.VARCHAR);
+                    }
+                    if (!isEmpty(owner_name)) {
+                        ps1.setString(8, owner_name);
+                    } else {
+                        ps1.setNull(8, Types.VARCHAR);
+                    }
+                    if (!isEmpty(owner_email)) {
+                        ps1.setString(9, owner_email);
+                    } else {
+                        ps1.setNull(9, Types.VARCHAR);
+                    }
+                    ps1.execute();
+                }
+
+            } catch (Exception ex) {
+                System.out.println("Unable to parse changes in " + change);
+                System.out.println(json);
+                throw ex;
+            }
+        }
+
+        ps1.close();
+    }
+
+    private static void writeGerritCloudData(Connection conn) throws Exception {
+        FileWriter fw = new FileWriter(CLOUD_DATA);
+        Statement st = conn.createStatement();
+        ResultSet rs = st.executeQuery("select id, commits, name, filter from cloud_data order by 1;");
         while (rs.next()) {
             String id = rs.getString(1);
             String commits = rs.getString(2);
@@ -338,7 +609,7 @@ public class CloudGenerator {
                     String username = rs.getString(2);
                     String filter = rs.getString(3);
                     int commits = rs.getInt(4);
-    
+
                     ps2.setInt(1, id);
                     if (!isEmpty(name)) {
                         ps2.setString(2, name);
@@ -387,7 +658,7 @@ public class CloudGenerator {
         ps2.close();
         br.close();
     }
-    
+
     private static void writeMetadataInfo(Connection conn, int originalSize) throws Exception {
         PreparedStatement ps1 = conn.prepareStatement("insert into info (key, value) values (?,?);");
 
@@ -418,7 +689,7 @@ public class CloudGenerator {
             ZipEntry entry = new ZipEntry(cloudImage.getName());
             out.putNextEntry(entry);
             int count;
-            while((count = origin.read(data, 0, 
+            while((count = origin.read(data, 0,
               BUFFER)) != -1) {
                out.write(data, 0, count);
             }
@@ -432,20 +703,20 @@ public class CloudGenerator {
         accts.addAll(readWellKnownAccounts());
         wellKnownAccounts = accts.size();
         int id = wellKnownAccounts + 1;
-        
+
         PreparedStatement ps1 = conn.prepareStatement("insert into accounts (id, accountId, username, name, email) values (?,?,?,?,?);");
         PreparedStatement ps5 = conn.prepareStatement("insert into gerrit_accounts (accountId, username, name, email) values (?,?,?,?);");
         PreparedStatement ps2 = conn.prepareStatement("insert into usernames (id, username) values (?,?);");
         PreparedStatement ps3 = conn.prepareStatement("insert into names (id, name) values (?,?);");
         PreparedStatement ps4 = conn.prepareStatement("insert into emails (id, email) values (?,?);");
-        
+
         File accountsDir = new File(ACCOUNTS_DIR);
         File[] accounts = accountsDir.listFiles();
-        
+
         for (File account : accounts) {
             if (account.getName().equals("last.txt") || account.getName().endsWith(".hasCommits")
                     || account.getName().endsWith(".noHasCommits")) continue;
-            String json = readJsonAccount(account);
+            String json = readJson(account, true);
             if (json.trim().length() == 0) continue;
             try {
                 JSONObject o = new JSONObject(json);
@@ -624,7 +895,7 @@ public class CloudGenerator {
             public boolean accept(File file) {
                 return file.isFile() && file.getName().equals(ALL_STATS_FILENAME);
             }
-            
+
         }, TrueFileFilter.INSTANCE);
         for (File stats : allStats) {
             String project = stats.getPath().replaceAll("\\\\", "/").replaceFirst(STATS_DIR, "");
@@ -663,7 +934,7 @@ public class CloudGenerator {
             public boolean accept(File file) {
                 return file.isFile() && file.getName().equals(TRANSLATIONS_STATS_FILENAME);
             }
-            
+
         }, TrueFileFilter.INSTANCE);
         for (File stats : translationStats) {
             String project = stats.getPath().replaceAll("\\\\", "/").replaceFirst(STATS_DIR, "");
@@ -724,10 +995,12 @@ public class CloudGenerator {
         br.close();
         return accounts;
     }
-    
-    private static String readJsonAccount(File account) throws Exception {
-        FileReader fr = new FileReader(account);
-        fr.read(new char[5]);
+
+    private static String readJson(File json, boolean hasheader) throws Exception {
+        FileReader fr = new FileReader(json);
+        if (hasheader) {
+            fr.read(new char[5]);
+        }
         StringBuffer sb = new StringBuffer();
         char[] data = new char[10240];
         int read = -1;
@@ -765,21 +1038,21 @@ public class CloudGenerator {
     }
 
     private static boolean isValidNameForSearch(String name) {
-        return name.indexOf(" ") != -1 && name.length() >= 5 && !name.equals("John Smith") && !name.equals("John Doe"); 
+        return name.indexOf(" ") != -1 && name.length() >= 5 && !name.equals("John Smith") && !name.equals("John Doe");
     }
 
     private static boolean userHasCommits(int id, int accountId, String name, String email) {
         InputStream is = null;
         String url = null;
         try {
-            if (id < wellKnownAccounts) {
+            if (id <= wellKnownAccounts) {
                 return true;
             }
             if (new File(ACCOUNTS_DIR, accountId + ".hasCommits").exists()) {
                 return true;
             }
             File noHasCommits = new File(ACCOUNTS_DIR, accountId + ".noHasCommits");
-            if (noHasCommits.exists() && (System.currentTimeMillis() - noHasCommits.lastModified()) < 2592000000L) { // 30 days 
+            if (noHasCommits.exists() && (System.currentTimeMillis() - noHasCommits.lastModified()) < 2592000000L) { // 30 days
                 return false;
             }
 
@@ -948,7 +1221,7 @@ public class CloudGenerator {
         fw.write("</svg>\r\n");
         fw.close();
     }
-    
+
     private static void convertSvgToPng(String svg, String png, int origSize, int dstSize, Color bg) throws Exception {
         String svg_URI_input = Paths.get(svg).toUri().toURL().toString();
         TranscoderInput input_svg_image = new TranscoderInput(svg_URI_input);
@@ -965,7 +1238,7 @@ public class CloudGenerator {
         png_ostream.flush();
         png_ostream.close();
     }
-    
+
     private static int readLastCloudSize() throws Exception {
         File file = new File(LAST_CLOUD_SIZE);
         if (!file.exists()) {
