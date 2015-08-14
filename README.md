@@ -15,7 +15,7 @@ The CyanogenMod contributors cloud scripts.
 > format of this file should match the name of the account and the list
 > of known emails for the account
 >
->      Name on Gerrit|email1|email2|...
+>      Name on Gerrit|nick|email1|email2|...
 
 This project is based in a modified version of the
 [kumo](https://github.com/kennycason/kumo) library.
