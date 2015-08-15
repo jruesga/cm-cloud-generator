@@ -120,10 +120,7 @@ public class CloudGenerator {
 
             LOGGER.info("Generating cloud");
             generateCloud(connMetadata);
-
-            writeMetadataInfo(connMetadata, 1804);
             generateMetadata(conn, connMetadata);
-
             generateCloudZip();
 
         } finally {
