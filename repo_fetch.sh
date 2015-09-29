@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GIT_CMD=/d/productos/git-2.4.5/bin/git
+GIT_CMD=/usr/bin/git
 
 OLD_PWD=`pwd`
 REPO_DIR=$OLD_PWD/db/repos/$1
