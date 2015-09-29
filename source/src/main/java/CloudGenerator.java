@@ -365,6 +365,7 @@ public class CloudGenerator {
     private static void fetchAllGerritCommits() throws Exception {
         final StringBuffer start = new StringBuffer("2010-10-28");
         File statsDir = new File(CHANGES_DIR);
+        statsDir.mkdirs();
         FileUtils.listFiles(statsDir, new IOFileFilter() {
             @Override
             public boolean accept(File dir, String name) {
