@@ -303,7 +303,10 @@ public class WordCloud {
 
     /**
      * try to place in center, build out in a spiral trying to place words for N steps
-     * @param word
+     * @param word The word to place
+     * @param startX The x start position
+     * @param startY The y start position
+     * @return if the word was placed
      */
     protected boolean place(final Word word, final int startX, final int startY) {
         final Graphics graphics = this.bufferedImage.getGraphics();
