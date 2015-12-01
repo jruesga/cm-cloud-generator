@@ -91,6 +91,7 @@ public class CloudGenerator {
 
     public static void main(String[] args) throws Exception {
         boolean FROM_GERRIT = true;
+        boolean closed = false;
 
         new File(DB_NAME).delete();
         new File(CLOUD_DB_FILE).delete();
@@ -121,13 +122,19 @@ public class CloudGenerator {
             LOGGER.info("Generating cloud");
             generateCloud(connMetadata);
             generateMetadata(conn, connMetadata);
+
+            // Close the database prior to compress it
+            connMetadata.commit();
+            connMetadata.close();
             generateCloudZip();
 
         } finally {
             conn.commit();
             conn.close();
-            connMetadata.commit();
-            connMetadata.close();
+            if (!connMetadata.isClosed()) {
+	            connMetadata.commit();
+	            connMetadata.close();
+            }
         }
     }
 
