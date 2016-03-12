@@ -908,23 +908,27 @@ public class CloudGenerator {
             BufferedReader br = new BufferedReader(new FileReader(stats));
             String line = null;
             while ((line = br.readLine()) != null) {
-                int commits = Integer.parseInt(line.substring(0, line.indexOf("\t")).trim());
-                String name = cleanup(line.substring(line.indexOf("\t")+1,line.lastIndexOf("<")).trim());
-                String email = cleanup(line.substring(line.lastIndexOf("<")+1, line.length()-1).trim());
-
-                ps1.setString(1, project);
-                ps1.setInt(2, commits);
-                if (isEmpty(name)) {
-                    ps1.setNull(3, Types.VARCHAR);
-                } else {
-                    ps1.setString(3, name);
+                try {
+                	int commits = Integer.parseInt(line.substring(0, line.indexOf("\t")).trim());
+                	String name = cleanup(line.substring(line.indexOf("\t")+1,line.lastIndexOf("<")).trim());
+	                String email = cleanup(line.substring(line.lastIndexOf("<")+1, line.length()-1).trim());
+	
+	                ps1.setString(1, project);
+	                ps1.setInt(2, commits);
+	                if (isEmpty(name)) {
+	                    ps1.setNull(3, Types.VARCHAR);
+	                } else {
+	                    ps1.setString(3, name);
+	                }
+	                if (isEmpty(email)) {
+	                    ps1.setNull(4, Types.VARCHAR);
+	                } else {
+	                    ps1.setString(4, email);
+	                }
+	                ps1.execute();
+                } catch (Exception ex ) {
+                	// Ignore this commit
                 }
-                if (isEmpty(email)) {
-                    ps1.setNull(4, Types.VARCHAR);
-                } else {
-                    ps1.setString(4, email);
-                }
-                ps1.execute();
             }
             br.close();
         }
