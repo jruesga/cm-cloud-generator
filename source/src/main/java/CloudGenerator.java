@@ -434,7 +434,7 @@ public class CloudGenerator {
         final int count = 250;
         while (true) {
             try {
-                String url = "http://review.cyanogenmod.org/changes/?q=status:merged+before:\"" + start + "\"+after:\"" + end + "\"&n=" + count + "&O=a&o=DETAILED_ACCOUNTS";
+                String url = "https://review.cyanogenmod.org/changes/?q=status:merged+before:\"" + start + "\"+after:\"" + end + "\"&n=" + count + "&O=a&o=DETAILED_ACCOUNTS";
                 if (s > 0) {
                     url += "&S="+s;
                 }
@@ -1069,9 +1069,9 @@ public class CloudGenerator {
             if (isEmpty(name)) {
                 owner = name + " <" + email + ">";
             }
-            url = "http://review.cyanogenmod.org/changes/?q=status:merged+owner:\"" + owner+ "\"&limit=1";
+            url = "https://review.cyanogenmod.org/changes/?q=status:merged+owner:\"" + owner+ "\"&limit=1";
             owner = URLEncoder.encode(owner, "UTF-8");
-            is = new URL("http://review.cyanogenmod.org/changes/?q=status:merged+owner:\"" + owner+ "\"&limit=1").openStream();
+            is = new URL("https://review.cyanogenmod.org/changes/?q=status:merged+owner:\"" + owner+ "\"&limit=1").openStream();
             byte[] data = new byte[11];
             int read = is.read(data);
             LOGGER.info ("Fetched " + url + ": " + (read > 8));
