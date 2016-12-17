@@ -376,7 +376,7 @@ public class CloudGenerator {
         FileUtils.listFiles(statsDir, new IOFileFilter() {
             @Override
             public boolean accept(File dir, String name) {
-                if (name.compareTo(start.toString()) > 0) {
+                if (name.contains("-") && name.compareTo(start.toString()) > 0) {
                     start.setLength(0);
                     start.append(name);
                 }
@@ -386,7 +386,8 @@ public class CloudGenerator {
             @Override
             public boolean accept(File file) {
                 String name = file.getName();
-                if (name.compareTo(start.toString()) > 0) {
+
+                if (file.isDirectory() && name.contains("-") && name.compareTo(start.toString()) > 0) {
                     start.setLength(0);
                     start.append(name);
                 }
